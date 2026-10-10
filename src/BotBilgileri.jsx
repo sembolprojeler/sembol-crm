@@ -13,14 +13,15 @@
 //   • YENİ (2026-10-10): ÖRNEK SOHBETLER — her marka için ayrı (Sembol açılınca kendi sayfasında görünür).
 //     Gerçek konuşmalardan örnekler; bot üslubu / soru sırasını / cevap biçimini bunlardan öğrenir.
 //     Elle yazılır ya da WhatsApp "Sohbeti dışa aktar" (.txt) dosyasından aktarılır; telefon ve e-posta
-//     otomatik maskelenir. icerik.ornekSohbetler alanında, bilgilerle AYNI kayıt / sürüm akışıyla saklanır.
+//     otomatik maskelenir. KENDİ "Örnekleri Kaydet" düğmesiyle AYRI belgede saklanır:
+//     artifacts/{appId}/public/data/botOrnekSohbetleri/{marka}  (bot bilgileri kaydını / doğrulamasını etkilemez).
 // Okuma: Firestore (kurallarda açık). Yazma: YALNIZCA /api/whatsapp-send (botBilgiKaydet /
 // botBilgiGeriAl / botBilgiDene) — personelId + şifre + botBilgiYetkisi (canEdit AÇMAZ).
 // Şema / doğrulama / Word dağıtma: src/botBilgiSema.js
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Save, RotateCcw, Upload, Download, Plus, Trash2, ArrowUp, ArrowDown, AlertTriangle, Info, Loader2, FileText, Play, X, MessageCircle, Eye, EyeOff } from 'lucide-react'; // YENİ: örnek sohbet simgeleri
-import { doc, collection, onSnapshot, orderBy, query, limit } from 'firebase/firestore';
+import { doc, collection, onSnapshot, orderBy, query, limit, setDoc } from 'firebase/firestore'; // YENİ: setDoc (örnek sohbet kaydı)
 import { db, appId } from './shared.jsx';
 import { firestoreKaynagi } from './whatsappKaynak.js';
 import { kaydedilmemisAyarla } from './kaydedilmemisUyari.js';
@@ -106,9 +107,10 @@ const whatsappTxtAyristir = (txt) => {
   return mesajlar.filter(x => x.metin.trim() && !atla.test(x.metin.trim()));
 };
 
-const bosIcerik = () => ({ bolumler: Object.fromEntries(METIN_BOLUMLERI.map(id => [id, ''])), sss: [], ornekSohbetler: [] });
-// DEĞİŞTİ (2026-10-10): ornekSohbetler alanı korunur
-const normalIcerik = (ic) => ({ bolumler: { ...bosIcerik().bolumler, ...(ic?.bolumler || {}) }, sss: (ic?.sss || []).map(x => ({ soru: x.soru || '', cevap: x.cevap || '' })), ornekSohbetler: normalOrnekler(ic?.ornekSohbetler) });
+const bosIcerik = () => ({ bolumler: Object.fromEntries(METIN_BOLUMLERI.map(id => [id, ''])), sss: [] });
+const normalIcerik = (ic) => ({ bolumler: { ...bosIcerik().bolumler, ...(ic?.bolumler || {}) }, sss: (ic?.sss || []).map(x => ({ soru: x.soru || '', cevap: x.cevap || '' })) });
+// YENİ (2026-10-10): örnek sohbet belgesi (bot bilgilerinden AYRI — sunucu doğrulamasına takılmaz)
+const ornekBelgesi = (marka) => doc(db, ...kok(), 'botOrnekSohbetleri', marka);
 const tarihMetni = (iso) => { const t = new Date(iso || ''); return Number.isNaN(t.getTime()) ? '' : t.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', dateStyle: 'short', timeStyle: 'short' }); };
 const baslikBul = (id) => BOT_BILGI_BOLUMLERI.find(b => b.id === id)?.baslik || id;
 function kaynakEtiketi(k = {}) {
@@ -137,9 +139,40 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
   const [dene, setDene] = useState({ soru: '', kaynak: 'kayitli', sonuc: null, hata: '' });
   const kimlik = { personelId: currentUser?.id, sifre: currentUser?.password };
 
-  // DEĞİŞTİ (2026-10-10): örnek sohbet değişiklikleri de "kaydedilmemiş" sayılır (şema karşılaştırması bu alanı bilmez)
-  const ornekKirli = !!(taslak && taban && JSON.stringify(normalOrnekler(taslak.ornekSohbetler)) !== JSON.stringify(normalOrnekler(taban.icerik?.ornekSohbetler)));
-  const kirli = !!(taslak && taban && !iceriklerEsitMi(taslak, taban.icerik)) || ornekKirli || !!word;
+  const kirli = !!(taslak && taban && !iceriklerEsitMi(taslak, taban.icerik)) || !!word;
+  // ---- YENİ (2026-10-10): ÖRNEK SOHBETLER — ayrı belge, ayrı taslak, ayrı Kaydet
+  const [ornekKayit, setOrnekKayit] = useState(undefined);   // undefined: yükleniyor · null: hiç kaydedilmemiş
+  const [ornekTaban, setOrnekTaban] = useState([]);
+  const [ornekTaslak, setOrnekTaslak] = useState([]);
+  const [ornekDurum, setOrnekDurum] = useState({ kaydediliyor: false, hata: '', ok: '' });
+  const ornekKirli = JSON.stringify(normalOrnekler(ornekTaslak)) !== JSON.stringify(normalOrnekler(ornekTaban));
+  const ornekKirliRef = useRef(false);
+  useEffect(() => { ornekKirliRef.current = ornekKirli; });
+  useEffect(() => onSnapshot(ornekBelgesi(marka), snap => {
+    const v = snap.exists() ? snap.data() : null;
+    setOrnekKayit(v);
+    const l = normalOrnekler(v?.sohbetler);
+    setOrnekTaban(l);
+    if (!ornekKirliRef.current) setOrnekTaslak(l); // düzenleme sürerken başkasının kaydı taslağı ezmez
+  }, (e) => { setOrnekKayit(null); setOrnekDurum(d => ({ ...d, hata: `Örnek sohbetler okunamadı: ${e?.message || ''}` })); }), [marka]);
+  const ornekHata = ornekDogrula(ornekTaslak);
+  async function ornekKaydet() {
+    if (ornekHata || !ornekKirli) return;
+    setOrnekDurum({ kaydediliyor: true, hata: '', ok: '' });
+    try {
+      const temiz = normalOrnekler(ornekTaslak).map(x => ({ ...x, metin: kisiselMaskele(x.metin) })); // kayıtta da kişisel veri maskelenir
+      await setDoc(ornekBelgesi(marka), {
+        marka, sohbetler: temiz, adet: temiz.length, toplam: ornekToplam(temiz),
+        kaydeden: { id: currentUser?.id || '', ad: currentUser?.fullName || '' }, kaydedilme: new Date().toISOString(),
+      });
+      setOrnekTaban(temiz); setOrnekTaslak(temiz);
+      addSystemLog?.('Bot Bilgileri', `${BOT_BILGI_MARKALARI.find(m => m.id === marka)?.ad} örnek sohbetleri kaydedildi (${temiz.length} sohbet).`);
+      setOrnekDurum({ kaydediliyor: false, hata: '', ok: `Kaydedildi (${temiz.length} sohbet).` });
+    } catch (e) {
+      console.error('Örnek sohbetler kaydedilemedi:', e);
+      setOrnekDurum({ kaydediliyor: false, ok: '', hata: `Kaydedilemedi: ${e?.message || 'bilinmeyen hata'}` });
+    }
+  }
   const kirliRef = useRef(kirli);
   const kayitRef = useRef(kayit);
   useEffect(() => { kirliRef.current = kirli; kayitRef.current = kayit; });
@@ -169,21 +202,14 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
 
   // ---- kaydedilmemiş değişiklik koruması (menü değişimi: App.jsx · sekme kapatma: beforeunload)
   useEffect(() => {
-    if (!kirli) { kaydedilmemisAyarla(null); return undefined; }
+    if (!kirli && !ornekKirli) { kaydedilmemisAyarla(null); return undefined; } // DEĞİŞTİ: örnek sohbetler de korunur
     kaydedilmemisAyarla(CIKIS_UYARISI);
     const dinle = (e) => { e.preventDefault(); e.returnValue = ''; return ''; };
     window.addEventListener('beforeunload', dinle);
     return () => { window.removeEventListener('beforeunload', dinle); kaydedilmemisAyarla(null); };
-  }, [kirli]);
+  }, [kirli, ornekKirli]);
 
-  // DEĞİŞTİ (2026-10-10): örnek sohbet sınırları da kontrol edilir
-  const dogrulama = useMemo(() => {
-    if (!taslak) return { ok: true };
-    const d = botBilgiDogrula(taslak);
-    if (!d.ok) return d;
-    const h = ornekDogrula(taslak.ornekSohbetler);
-    return h ? { ok: false, hata: h } : d;
-  }, [taslak]);
+  const dogrulama = useMemo(() => (taslak ? botBilgiDogrula(taslak) : { ok: true }), [taslak]);
   const toplam = taslak ? karakterSayisi(taslak) : 0;
   const S = BOT_BILGI_SINIRLARI;
 
@@ -202,15 +228,15 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
   // ---- YENİ (2026-10-10): örnek sohbet düzenleme
   const [ornekOnizle, setOrnekOnizle] = useState({});        // { index: true } — balon önizlemesi açık olanlar
   const [waAktar, setWaAktar] = useState(null);              // { dosyaAdi, mesajlar, adlar, biz: Set }
-  const ornekler = taslak?.ornekSohbetler || [];
-  const ornekYaz = (i, alan, v) => setTaslak(t => ({ ...t, ornekSohbetler: t.ornekSohbetler.map((x, j) => (j === i ? { ...x, [alan]: v } : x)) }));
-  const ornekEkle = (yeni = bosOrnek()) => setTaslak(t => ({ ...t, ornekSohbetler: [...(t.ornekSohbetler || []), yeni] }));
-  const ornekSil = (i) => { if (window.confirm('Bu örnek sohbet silinsin mi?')) setTaslak(t => ({ ...t, ornekSohbetler: t.ornekSohbetler.filter((_, j) => j !== i) })); };
-  const ornekTasi = (i, yon) => setTaslak(t => {
-    const j = i + yon; const l = [...t.ornekSohbetler];
-    if (j < 0 || j >= l.length) return t;
+  const ornekler = ornekTaslak;
+  const ornekYaz = (i, alan, v) => { setOrnekDurum(d => ({ ...d, ok: '' })); setOrnekTaslak(l => l.map((x, j) => (j === i ? { ...x, [alan]: v } : x))); };
+  const ornekEkle = (yeni = bosOrnek()) => { setOrnekDurum(d => ({ ...d, ok: '' })); setOrnekTaslak(l => [...l, yeni]); };
+  const ornekSil = (i) => { if (window.confirm('Bu örnek sohbet silinsin mi? (Kaydet\'e basınca kalıcı olur)')) setOrnekTaslak(l => l.filter((_, j) => j !== i)); };
+  const ornekTasi = (i, yon) => setOrnekTaslak(l0 => {
+    const j = i + yon; const l = [...l0];
+    if (j < 0 || j >= l.length) return l0;
     [l[i], l[j]] = [l[j], l[i]];
-    return { ...t, ornekSohbetler: l };
+    return l;
   });
   // WhatsApp dışa aktarım dosyası seçildi → konuşanları göster, "Biz" kim seçtir
   async function waDosyaSec(e) {
@@ -239,7 +265,7 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
     let metin = satirlar.map(x => `${x.rol}: ${x.metin}`).join('\n');
     if (metin.length > ORNEK_SINIR.sohbet) metin = `${metin.slice(0, ORNEK_SINIR.sohbet - 40).replace(/\n[^\n]*$/, '')}\n… (sohbet kısaltıldı)`;
     ornekEkle({ baslik: waAktar.dosyaAdi.replace(/\.txt$/i, '').replace(/^WhatsApp (Chat with|Sohbeti) /i, '').slice(0, 80) || 'WhatsApp sohbeti', konu: 'Genel', metin });
-    setBildirim({ tur: 'ok', metin: 'Sohbet örneklere eklendi (telefon / e-posta maskelendi). Gözden geçirin; bota yansıması için Kaydet\'e basın.' });
+    setBildirim({ tur: 'ok', metin: 'Sohbet örneklere eklendi (telefon / e-posta maskelendi). Gözden geçirin ve Örnek Sohbetler bölümündeki "Örnekleri Kaydet"e basın.' });
     setWaAktar(null);
   }
 
@@ -326,7 +352,7 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
           </div>
           <div className="flex gap-1.5">
             {BOT_BILGI_MARKALARI.map(m => (
-              <button key={m.id} type="button" disabled={!m.aktif || isleniyor} onClick={() => { if (m.id !== marka && (!kirli || window.confirm(CIKIS_UYARISI))) setMarka(m.id); }}
+              <button key={m.id} type="button" disabled={!m.aktif || isleniyor} onClick={() => { if (m.id !== marka && ((!kirli && !ornekKirli) || window.confirm(CIKIS_UYARISI))) setMarka(m.id); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black border ${m.id === marka ? 'bg-black text-white border-black' : 'border-neutral-200 text-neutral-600'} disabled:opacity-40`}
                 title={m.aktif ? '' : 'Yakında'}>{m.ad}{m.aktif ? '' : ' (yakında)'}</button>
             ))}
@@ -455,7 +481,7 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
         {/* ==================================================================
             YENİ (2026-10-10 · kullanıcı talebi): ÖRNEK SOHBETLER (markaya özel)
             ================================================================== */}
-        <fieldset disabled={!!word || isleniyor === 'kaydet' || isleniyor === 'geriAl'} className="disabled:opacity-60">
+        <fieldset disabled={ornekDurum.kaydediliyor || ornekKayit === undefined} className="disabled:opacity-60">
           <div className="bg-white rounded-2xl border-2 border-green-200 p-4 shadow-sm space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
               <MessageCircle className="w-5 h-5 text-green-600" />
@@ -475,6 +501,26 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
               Her satırı <b>"Müşteri:"</b> ya da <b>"Biz:"</b> ile başlatın. Fiyat rakamları yine Fiyat Tablosu'ndan gelir; telefon / e-posta otomatik maskelenir.
               Bu marka için ayrıdır{marka !== 'sembol' ? ' — Sembol açıldığında kendi sayfasında ayrı örnekler girilir' : ''}.
             </p>
+
+            {/* YENİ: ÖRNEKLERİ KAYDET çubuğu — bilgilerin Kaydet'inden bağımsız */}
+            <div className="flex items-center gap-2 flex-wrap rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+              <div className="text-[12px] font-bold text-neutral-600 flex-1 min-w-0">
+                {ornekKayit ? <>Son kayıt: <b className="text-black">{ornekKayit.kaydeden?.ad || '—'}</b> · {tarihMetni(ornekKayit.kaydedilme)} · {(ornekKayit.adet ?? (ornekKayit.sohbetler || []).length)} sohbet</>
+                  : ornekKayit === null ? <span className="text-neutral-400">Henüz kaydedilmiş örnek sohbet yok.</span>
+                  : <span className="text-neutral-400"><Loader2 className="w-3.5 h-3.5 animate-spin inline mr-1" />Yükleniyor…</span>}
+                {ornekKirli && <span className="ml-2 text-red-600">· Kaydedilmemiş örnek var</span>}
+                {ornekDurum.ok && !ornekKirli && <span className="ml-2 text-green-700">· {ornekDurum.ok}</span>}
+              </div>
+              {ornekKirli && (
+                <button type="button" onClick={() => { if (window.confirm('Kaydedilmemiş örnek sohbet değişiklikleri silinsin mi?')) setOrnekTaslak(ornekTaban); }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-black border border-neutral-200 bg-white hover:bg-neutral-50 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Vazgeç</button>
+              )}
+              <button type="button" onClick={ornekKaydet} disabled={!ornekKirli || !!ornekHata || ornekDurum.kaydediliyor}
+                className="px-4 py-1.5 rounded-lg text-xs font-black bg-green-600 hover:bg-green-700 text-white flex items-center gap-1 disabled:opacity-40">
+                {ornekDurum.kaydediliyor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Örnekleri Kaydet</button>
+            </div>
+            {ornekHata && ornekKirli && <p className="text-[12px] font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{ornekHata}</p>}
+            {ornekDurum.hata && <p className="text-[12px] font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{ornekDurum.hata}</p>}
 
             {/* WhatsApp .txt aktarımı — "Biz" kim? */}
             {waAktar && (
