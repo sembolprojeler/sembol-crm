@@ -10,12 +10,16 @@
 //     Değiştir / Ekle / Yoksay — Kaydet'e basılmadan bota yansımaz. Yükleme başarısızsa içerik
 //     yine aktarılır, sürüme yalnızca dosya adı yazılır.
 //   • Dene: kayıtlı bilgi ya da ekrandaki taslakla botun cevabı (müşteriye hiçbir şey gitmez)
+//   • YENİ (2026-10-10): ÖRNEK SOHBETLER — her marka için ayrı (Sembol açılınca kendi sayfasında görünür).
+//     Gerçek konuşmalardan örnekler; bot üslubu / soru sırasını / cevap biçimini bunlardan öğrenir.
+//     Elle yazılır ya da WhatsApp "Sohbeti dışa aktar" (.txt) dosyasından aktarılır; telefon ve e-posta
+//     otomatik maskelenir. icerik.ornekSohbetler alanında, bilgilerle AYNI kayıt / sürüm akışıyla saklanır.
 // Okuma: Firestore (kurallarda açık). Yazma: YALNIZCA /api/whatsapp-send (botBilgiKaydet /
 // botBilgiGeriAl / botBilgiDene) — personelId + şifre + botBilgiYetkisi (canEdit AÇMAZ).
 // Şema / doğrulama / Word dağıtma: src/botBilgiSema.js
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Save, RotateCcw, Upload, Download, Plus, Trash2, ArrowUp, ArrowDown, AlertTriangle, Info, Loader2, FileText, Play, X } from 'lucide-react';
+import { Bot, Save, RotateCcw, Upload, Download, Plus, Trash2, ArrowUp, ArrowDown, AlertTriangle, Info, Loader2, FileText, Play, X, MessageCircle, Eye, EyeOff } from 'lucide-react'; // YENİ: örnek sohbet simgeleri
 import { doc, collection, onSnapshot, orderBy, query, limit } from 'firebase/firestore';
 import { db, appId } from './shared.jsx';
 import { firestoreKaynagi } from './whatsappKaynak.js';
@@ -65,8 +69,46 @@ const botBilgiKaynagi = {
   },
 };
 
-const bosIcerik = () => ({ bolumler: Object.fromEntries(METIN_BOLUMLERI.map(id => [id, ''])), sss: [] });
-const normalIcerik = (ic) => ({ bolumler: { ...bosIcerik().bolumler, ...(ic?.bolumler || {}) }, sss: (ic?.sss || []).map(x => ({ soru: x.soru || '', cevap: x.cevap || '' })) });
+// ============================================================================
+// YENİ (2026-10-10 · kullanıcı talebi): ÖRNEK SOHBETLER
+// ----------------------------------------------------------------------------
+// Her sohbet: { baslik, konu, metin }  metin satırları "Müşteri: …" / "Biz: …" biçiminde.
+// Sınırlar botun her mesajda okuyacağı metni makul tutmak içindir.
+// ============================================================================
+const ORNEK_SINIR = { adet: 30, sohbet: 4000, toplam: 40000 };
+const ORNEK_KONULAR = ['Genel', 'Eşya Depolama', 'Kiralık Depo', 'Nakliye', 'Fiyat sorusu', 'Pazarlık / itiraz', 'Randevu / ziyaret', 'Şikâyet'];
+const bosOrnek = () => ({ baslik: '', konu: 'Genel', metin: 'Müşteri: \nBiz: ' });
+const normalOrnekler = (l) => (Array.isArray(l) ? l : []).map(x => ({ baslik: x?.baslik || '', konu: x?.konu || 'Genel', metin: x?.metin || '' }));
+const ornekToplam = (l) => (l || []).reduce((t, x) => t + (x.metin || '').length + (x.baslik || '').length, 0);
+const ornekDogrula = (l) => {
+  if ((l || []).length > ORNEK_SINIR.adet) return `En fazla ${ORNEK_SINIR.adet} örnek sohbet eklenebilir.`;
+  const uzun = (l || []).findIndex(x => (x.metin || '').length > ORNEK_SINIR.sohbet);
+  if (uzun >= 0) return `${uzun + 1}. örnek sohbet çok uzun (en fazla ${ORNEK_SINIR.sohbet.toLocaleString('tr-TR')} karakter).`;
+  if (ornekToplam(l) > ORNEK_SINIR.toplam) return `Örnek sohbetlerin toplamı ${ORNEK_SINIR.toplam.toLocaleString('tr-TR')} karakteri aşamaz.`;
+  const bos = (l || []).findIndex(x => !(x.metin || '').replace(/^(Müşteri|Biz):\s*$/gm, '').trim());
+  if (bos >= 0) return `${bos + 1}. örnek sohbet boş — doldurun ya da silin.`;
+  return '';
+};
+// Kişisel bilgileri maskeler (telefon, e-posta) — örnekler bota "öğretilir", kişisel veri taşımasın
+const kisiselMaskele = (m) => String(m || '')
+  .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[e-posta]')
+  .replace(/(?:\+?90[\s-]?)?0?\(?5\d{2}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}/g, '[telefon]');
+// WhatsApp "Sohbeti dışa aktar" .txt → [{ ad, metin }]  (Android: "10.10.2026 14:58 - Ali: …", iOS: "[10.10.2026 14:58:12] Ali: …")
+const whatsappTxtAyristir = (txt) => {
+  const satirRe = /^\[?(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?)(?:\s?[APap][Mm])?\]?\s*(?:-\s*)?([^:]{1,60}):\s?(.*)$/;
+  const mesajlar = [];
+  String(txt || '').replace(/[‎‏‪-‮]/g, '').split(/\r?\n/).forEach(satir => {
+    const m = satir.match(satirRe);
+    if (m) mesajlar.push({ ad: m[3].trim(), metin: m[4] });
+    else if (mesajlar.length && satir.trim()) mesajlar[mesajlar.length - 1].metin += `\n${satir}`;
+  });
+  const atla = /^<?(medya dahil edilmedi|media omitted|bu mesaj silindi|this message was deleted|görüntü dahil edilmedi|image omitted|video omitted|ses dahil edilmedi|audio omitted)>?$/i;
+  return mesajlar.filter(x => x.metin.trim() && !atla.test(x.metin.trim()));
+};
+
+const bosIcerik = () => ({ bolumler: Object.fromEntries(METIN_BOLUMLERI.map(id => [id, ''])), sss: [], ornekSohbetler: [] });
+// DEĞİŞTİ (2026-10-10): ornekSohbetler alanı korunur
+const normalIcerik = (ic) => ({ bolumler: { ...bosIcerik().bolumler, ...(ic?.bolumler || {}) }, sss: (ic?.sss || []).map(x => ({ soru: x.soru || '', cevap: x.cevap || '' })), ornekSohbetler: normalOrnekler(ic?.ornekSohbetler) });
 const tarihMetni = (iso) => { const t = new Date(iso || ''); return Number.isNaN(t.getTime()) ? '' : t.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', dateStyle: 'short', timeStyle: 'short' }); };
 const baslikBul = (id) => BOT_BILGI_BOLUMLERI.find(b => b.id === id)?.baslik || id;
 function kaynakEtiketi(k = {}) {
@@ -95,7 +137,9 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
   const [dene, setDene] = useState({ soru: '', kaynak: 'kayitli', sonuc: null, hata: '' });
   const kimlik = { personelId: currentUser?.id, sifre: currentUser?.password };
 
-  const kirli = !!(taslak && taban && !iceriklerEsitMi(taslak, taban.icerik)) || !!word;
+  // DEĞİŞTİ (2026-10-10): örnek sohbet değişiklikleri de "kaydedilmemiş" sayılır (şema karşılaştırması bu alanı bilmez)
+  const ornekKirli = !!(taslak && taban && JSON.stringify(normalOrnekler(taslak.ornekSohbetler)) !== JSON.stringify(normalOrnekler(taban.icerik?.ornekSohbetler)));
+  const kirli = !!(taslak && taban && !iceriklerEsitMi(taslak, taban.icerik)) || ornekKirli || !!word;
   const kirliRef = useRef(kirli);
   const kayitRef = useRef(kayit);
   useEffect(() => { kirliRef.current = kirli; kayitRef.current = kayit; });
@@ -132,7 +176,14 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
     return () => { window.removeEventListener('beforeunload', dinle); kaydedilmemisAyarla(null); };
   }, [kirli]);
 
-  const dogrulama = useMemo(() => (taslak ? botBilgiDogrula(taslak) : { ok: true }), [taslak]);
+  // DEĞİŞTİ (2026-10-10): örnek sohbet sınırları da kontrol edilir
+  const dogrulama = useMemo(() => {
+    if (!taslak) return { ok: true };
+    const d = botBilgiDogrula(taslak);
+    if (!d.ok) return d;
+    const h = ornekDogrula(taslak.ornekSohbetler);
+    return h ? { ok: false, hata: h } : d;
+  }, [taslak]);
   const toplam = taslak ? karakterSayisi(taslak) : 0;
   const S = BOT_BILGI_SINIRLARI;
 
@@ -147,6 +198,50 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
     const s = [...t.sss]; [s[i], s[j]] = [s[j], s[i]];
     return { ...t, sss: s };
   });
+
+  // ---- YENİ (2026-10-10): örnek sohbet düzenleme
+  const [ornekOnizle, setOrnekOnizle] = useState({});        // { index: true } — balon önizlemesi açık olanlar
+  const [waAktar, setWaAktar] = useState(null);              // { dosyaAdi, mesajlar, adlar, biz: Set }
+  const ornekler = taslak?.ornekSohbetler || [];
+  const ornekYaz = (i, alan, v) => setTaslak(t => ({ ...t, ornekSohbetler: t.ornekSohbetler.map((x, j) => (j === i ? { ...x, [alan]: v } : x)) }));
+  const ornekEkle = (yeni = bosOrnek()) => setTaslak(t => ({ ...t, ornekSohbetler: [...(t.ornekSohbetler || []), yeni] }));
+  const ornekSil = (i) => { if (window.confirm('Bu örnek sohbet silinsin mi?')) setTaslak(t => ({ ...t, ornekSohbetler: t.ornekSohbetler.filter((_, j) => j !== i) })); };
+  const ornekTasi = (i, yon) => setTaslak(t => {
+    const j = i + yon; const l = [...t.ornekSohbetler];
+    if (j < 0 || j >= l.length) return t;
+    [l[i], l[j]] = [l[j], l[i]];
+    return { ...t, ornekSohbetler: l };
+  });
+  // WhatsApp dışa aktarım dosyası seçildi → konuşanları göster, "Biz" kim seçtir
+  async function waDosyaSec(e) {
+    const dosya = e.target.files?.[0];
+    e.target.value = '';
+    if (!dosya) return;
+    if (!/\.txt$/i.test(dosya.name)) { setBildirim({ tur: 'hata', metin: 'WhatsApp\'ta sohbette "Sohbeti dışa aktar → Medyasız" deyin; gelen .txt dosyasını seçin.' }); return; }
+    if (dosya.size > 2 * 1024 * 1024) { setBildirim({ tur: 'hata', metin: 'Dosya 2 MB\'tan büyük olamaz.' }); return; }
+    const mesajlar = whatsappTxtAyristir(await dosya.text());
+    if (!mesajlar.length) { setBildirim({ tur: 'hata', metin: 'Dosyada mesaj bulunamadı. WhatsApp\'tan "Sohbeti dışa aktar" ile alınmış .txt dosyası olmalı.' }); return; }
+    const adlar = [...new Set(mesajlar.map(m => m.ad))];
+    // Şirket adı geçen konuşmacı (Sembol / DepoEvim) varsayılan olarak "Biz" seçilir
+    const biz = new Set(adlar.filter(a => /sembol|depoevim|depo evim/i.test(a)));
+    setWaAktar({ dosyaAdi: dosya.name, mesajlar, adlar, biz });
+  }
+  function waUygula() {
+    if (!waAktar?.biz?.size) return;
+    // Arka arkaya aynı tarafın mesajları tek satırda birleşir; telefon / e-posta maskelenir
+    const satirlar = [];
+    waAktar.mesajlar.forEach(m => {
+      const rol = waAktar.biz.has(m.ad) ? 'Biz' : 'Müşteri';
+      const metin = kisiselMaskele(m.metin).replace(/\s*\n\s*/g, ' ').trim();
+      if (satirlar.length && satirlar[satirlar.length - 1].rol === rol) satirlar[satirlar.length - 1].metin += ` ${metin}`;
+      else satirlar.push({ rol, metin });
+    });
+    let metin = satirlar.map(x => `${x.rol}: ${x.metin}`).join('\n');
+    if (metin.length > ORNEK_SINIR.sohbet) metin = `${metin.slice(0, ORNEK_SINIR.sohbet - 40).replace(/\n[^\n]*$/, '')}\n… (sohbet kısaltıldı)`;
+    ornekEkle({ baslik: waAktar.dosyaAdi.replace(/\.txt$/i, '').replace(/^WhatsApp (Chat with|Sohbeti) /i, '').slice(0, 80) || 'WhatsApp sohbeti', konu: 'Genel', metin });
+    setBildirim({ tur: 'ok', metin: 'Sohbet örneklere eklendi (telefon / e-posta maskelendi). Gözden geçirin; bota yansıması için Kaydet\'e basın.' });
+    setWaAktar(null);
+  }
 
   // ---- sunucu işlemleri
   async function kaydet() {
@@ -355,6 +450,100 @@ function BotBilgileriSayfasi({ marka, setMarka, currentUser, addSystemLog, kayna
                 className={`w-full border rounded-lg px-3 py-2 text-sm leading-relaxed ${b.id === 'asla' ? 'border-red-200 bg-red-50/30' : 'border-neutral-200'}`} />
             </div>
           )))}
+        </fieldset>
+
+        {/* ==================================================================
+            YENİ (2026-10-10 · kullanıcı talebi): ÖRNEK SOHBETLER (markaya özel)
+            ================================================================== */}
+        <fieldset disabled={!!word || isleniyor === 'kaydet' || isleniyor === 'geriAl'} className="disabled:opacity-60">
+          <div className="bg-white rounded-2xl border-2 border-green-200 p-4 shadow-sm space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <MessageCircle className="w-5 h-5 text-green-600" />
+              <h3 className="font-black text-sm text-black flex-1 min-w-0">
+                Örnek Sohbetler — {BOT_BILGI_MARKALARI.find(m => m.id === marka)?.ad}
+                <span className="ml-1 text-[11px] font-bold text-neutral-400">({ornekler.length} / {ORNEK_SINIR.adet} · {ornekToplam(ornekler).toLocaleString('tr-TR')} / {ORNEK_SINIR.toplam.toLocaleString('tr-TR')} karakter)</span>
+              </h3>
+              <label className={`px-2.5 py-1.5 rounded-lg text-xs font-black border border-green-300 text-green-800 flex items-center gap-1 ${ornekler.length >= ORNEK_SINIR.adet ? 'opacity-40 pointer-events-none' : 'hover:bg-green-50 cursor-pointer'}`}>
+                <Upload className="w-3.5 h-3.5" /> WhatsApp'tan aktar (.txt)
+                <input type="file" accept=".txt,text/plain" className="hidden" onChange={waDosyaSec} />
+              </label>
+              <button type="button" onClick={() => ornekEkle()} disabled={ornekler.length >= ORNEK_SINIR.adet}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-black bg-green-600 hover:bg-green-700 text-white flex items-center gap-1 disabled:opacity-40"><Plus className="w-3.5 h-3.5" /> Sohbet ekle</button>
+            </div>
+            <p className="text-[12px] font-bold text-neutral-500 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+              Gerçek müşteri konuşmalarından iyi örnekler ekleyin. Bot yeni müşterilere cevap verirken bu sohbetlerdeki <b>üslubu, soru sırasını ve cevap biçimini</b> örnek alır.
+              Her satırı <b>"Müşteri:"</b> ya da <b>"Biz:"</b> ile başlatın. Fiyat rakamları yine Fiyat Tablosu'ndan gelir; telefon / e-posta otomatik maskelenir.
+              Bu marka için ayrıdır{marka !== 'sembol' ? ' — Sembol açıldığında kendi sayfasında ayrı örnekler girilir' : ''}.
+            </p>
+
+            {/* WhatsApp .txt aktarımı — "Biz" kim? */}
+            {waAktar && (
+              <div className="border-2 border-blue-300 rounded-xl p-3 space-y-2 bg-blue-50/40">
+                <p className="text-sm font-black text-black">{waAktar.dosyaAdi} — {waAktar.mesajlar.length} mesaj</p>
+                <p className="text-[12px] font-bold text-neutral-600">Bu sohbette <b>şirket adına</b> yazanları işaretleyin (geri kalanlar "Müşteri" olur):</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {waAktar.adlar.map(ad => {
+                    const secili = waAktar.biz.has(ad);
+                    return (
+                      <button key={ad} type="button" onClick={() => setWaAktar(w => { const b = new Set(w.biz); if (b.has(ad)) b.delete(ad); else b.add(ad); return { ...w, biz: b }; })}
+                        className={`px-2.5 py-1 rounded-lg text-[12px] font-black border ${secili ? 'bg-green-600 text-white border-green-600' : 'bg-white text-neutral-700 border-neutral-300'}`}>
+                        {kisiselMaskele(ad)} {secili ? '· Biz' : '· Müşteri'}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button type="button" onClick={() => setWaAktar(null)} className="px-3 py-1.5 rounded-lg text-xs font-black border border-neutral-200 bg-white">İptal</button>
+                  <button type="button" onClick={waUygula} disabled={!waAktar.biz.size} className="px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40">Örneklere ekle</button>
+                </div>
+              </div>
+            )}
+
+            {!ornekler.length && !waAktar && <p className="text-[12px] font-bold text-neutral-400">Henüz örnek sohbet yok.</p>}
+            <div className="space-y-2.5">
+              {ornekler.map((x, i) => {
+                const satirlar = (x.metin || '').split('\n').filter(l => l.trim());
+                return (
+                  <div key={i} className="border border-neutral-200 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-black text-white bg-green-600 rounded-md px-1.5 py-0.5">{i + 1}</span>
+                      <input value={x.baslik} maxLength={80} onChange={e => ornekYaz(i, 'baslik', e.target.value)} placeholder="Başlık (ör. 2+1 depolama — fiyat sorusu)"
+                        className="flex-1 min-w-[180px] border border-neutral-200 rounded-lg px-2.5 py-1.5 text-sm font-bold" />
+                      <select value={x.konu} onChange={e => ornekYaz(i, 'konu', e.target.value)} className="border border-neutral-200 rounded-lg px-2 py-1.5 text-xs font-black bg-white">
+                        {ORNEK_KONULAR.map(k => <option key={k}>{k}</option>)}
+                      </select>
+                      <button type="button" onClick={() => setOrnekOnizle(o => ({ ...o, [i]: !o[i] }))} className="p-1.5 rounded-lg hover:bg-neutral-100" title={ornekOnizle[i] ? 'Düzenle' : 'Önizle'}>
+                        {ornekOnizle[i] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                      <button type="button" onClick={() => ornekTasi(i, -1)} disabled={i === 0} className="p-1.5 rounded-lg hover:bg-neutral-100 disabled:opacity-30" title="Yukarı"><ArrowUp className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => ornekTasi(i, 1)} disabled={i === ornekler.length - 1} className="p-1.5 rounded-lg hover:bg-neutral-100 disabled:opacity-30" title="Aşağı"><ArrowDown className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => ornekSil(i)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-600" title="Sil"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                    {ornekOnizle[i] ? (
+                      /* Balon önizlemesi — WhatsApp görünümü */
+                      <div className="bg-[#efeae2] rounded-lg p-2.5 space-y-1.5 max-h-80 overflow-y-auto">
+                        {satirlar.map((l, j) => {
+                          const biz = /^Biz\s*:/i.test(l);
+                          const metin = l.replace(/^(Müşteri|Biz)\s*:\s*/i, '');
+                          return (
+                            <div key={j} className={`flex ${biz ? 'justify-end' : 'justify-start'}`}>
+                              <p className={`max-w-[80%] rounded-xl px-2.5 py-1.5 text-[13px] shadow-sm whitespace-pre-wrap ${biz ? 'bg-[#d9fdd3]' : 'bg-white'}`}>{metin}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <textarea value={x.metin} onChange={e => ornekYaz(i, 'metin', e.target.value)} rows={Math.min(14, Math.max(4, (x.metin || '').split('\n').length + 1))}
+                        placeholder={'Müşteri: Merhaba, 2+1 evimi depolatmak istiyorum\nBiz: Merhaba, memnuniyetle yardımcı olalım. Eşyalarınız şu an hangi ilçede?'}
+                        className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm leading-relaxed font-mono" />
+                    )}
+                    <p className={`text-[11px] font-bold text-right ${(x.metin || '').length > ORNEK_SINIR.sohbet ? 'text-red-600' : 'text-neutral-400'}`}>
+                      {satirlar.filter(l => /^Müşteri\s*:/i.test(l)).length} müşteri · {satirlar.filter(l => /^Biz\s*:/i.test(l)).length} biz mesajı · {(x.metin || '').length.toLocaleString('tr-TR')} / {ORNEK_SINIR.sohbet.toLocaleString('tr-TR')}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </fieldset>
 
         {/* Dene */}
